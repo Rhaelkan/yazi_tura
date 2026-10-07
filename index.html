@@ -5,90 +5,284 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Yazı Tura</title>
 <style>
-  :root {
-    --bg: #1b2a41; --ink: #f3efe6; --muted: #9fb0c8;
-    --gold: #e8b73c; --gold-dark: #a97c14; --copper: #c9d4e3; --copper-dark: #7d8ca3;
-  }
+  :root { --bg:#0f2a2e; --bg-light:#1b4046; --ink:#f5ecd9; --muted:#8fb0aa; --brass:#d9a441; --bronze:#c4724f; }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
-    background: var(--bg); color: var(--ink);
-    font-family: Georgia, "Times New Roman", serif;
-    display: flex; flex-direction: column; align-items: center;
-    justify-content: center; gap: 28px; padding: 24px; text-align: center;
+    background: radial-gradient(ellipse at 50% 30%, var(--bg-light), var(--bg) 70%);
+    color: var(--ink); font-family: Georgia, "Times New Roman", serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 16px; text-align: center;
   }
-  h1 { font-size: clamp(2rem, 6vw, 3rem); margin: 0; letter-spacing: .02em; }
-  .stage { perspective: 900px; height: 190px; display: flex; align-items: center; }
-  .coin {
-    width: 160px; height: 160px; position: relative;
-    transform-style: preserve-3d; transition: transform 1.6s cubic-bezier(.2,.7,.2,1);
-  }
-  .face {
-    position: absolute; inset: 0; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 2.1rem; font-weight: bold; backface-visibility: hidden;
-    border: 6px solid rgba(0,0,0,.18);
-  }
-  .yazi { background: radial-gradient(circle at 35% 30%, #f6d77a, var(--gold) 60%, var(--gold-dark)); color: #5b4108; }
-  .tura { background: radial-gradient(circle at 35% 30%, #eef2f8, var(--copper) 60%, var(--copper-dark)); color: #3b4659; transform: rotateY(180deg); }
+  h1 { font-size: clamp(1.8rem, 5vw, 2.6rem); margin: 0; font-weight: normal; letter-spacing: .03em; }
+  #view { width: min(94vw, 720px); height: min(52vh, 420px); border-radius: 18px; overflow: hidden; background: #0c2226; }
+  #view canvas { display: block; }
   .result { font-size: 1.5rem; min-height: 2rem; }
-  button {
-    font: inherit; font-size: 1.1rem; padding: 12px 32px; border-radius: 999px;
-    border: 2px solid var(--gold); background: var(--gold); color: #2a1f05; cursor: pointer;
-  }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  button { font: inherit; cursor: pointer; border-radius: 999px; border: 2px solid var(--ink); background: var(--ink); color: #12262a; font-size: 1.1rem; padding: 11px 32px; }
   button:disabled { opacity: .5; cursor: wait; }
-  button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
-  .score { display: flex; gap: 32px; color: var(--muted); font-size: 1.1rem; }
-  .score strong { color: var(--ink); font-size: 1.5rem; display: block; }
-  .reset { background: transparent; color: var(--muted); border-color: var(--muted); font-size: .9rem; padding: 6px 18px; }
-  @media (prefers-reduced-motion: reduce) { .coin { transition-duration: .01s; } }
+  button:focus-visible { outline: 3px solid var(--brass); outline-offset: 3px; }
+  .ghost { background: transparent; color: var(--muted); border-color: var(--muted); font-size: .9rem; padding: 6px 18px; }
+  .score { display: flex; gap: 40px; color: var(--muted); font-size: 1rem; }
+  .score strong { display: block; font-size: 1.7rem; font-weight: normal; }
+  .score .a strong { color: var(--brass); } .score .b strong { color: var(--bronze); }
 </style>
 </head>
 <body>
   <h1>Yazı mı, Tura mı?</h1>
-  <div class="stage"><div class="coin" id="coin">
-    <div class="face yazi">YAZI</div>
-    <div class="face tura">TURA</div>
-  </div></div>
+  <div id="view"></div>
   <div class="result" id="result" aria-live="polite">Parayı atmak için düğmeye bas.</div>
-  <button id="flip">Parayı at</button>
-  <div class="score">
-    <div><strong id="yaziCount">0</strong>Yazı</div>
-    <div><strong id="turaCount">0</strong>Tura</div>
+  <div class="row">
+    <button id="flip">Parayı at</button>
+    <button class="ghost" id="mute" aria-pressed="false">Ses: açık</button>
+    <button class="ghost" id="reset">Sıfırla</button>
   </div>
-  <button class="reset" id="reset">Sıfırla</button>
+  <div class="score">
+    <div class="a"><strong id="yaziCount">0</strong>Yazı</div>
+    <div class="b"><strong id="turaCount">0</strong>Tura</div>
+  </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
-  const coin = document.getElementById('coin');
-  const result = document.getElementById('result');
-  const flipBtn = document.getElementById('flip');
-  const counts = { yazi: 0, tura: 0 };
-  let rotation = 0;
+/*PHYS_START*/
+const CR = 1, CH = 0.16, GRAV = 22;
+function makeSim(THREE) {
+  const V = THREE.Vector3, Q = THREE.Quaternion;
+  const h = CH / 2, M = 1, Ip = M * (CR * CR / 4 + CH * CH / 12), Ia = 0.5 * M * CR * CR;
+  const s = { p: new V(0, h, 0), v: new V(), w: new V(), q: new Q(), active: false, age: 0, rest: 0, stuck: 0, result: null, onImpact: null, onDone: null };
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const axisY = () => new V(0, 1, 0).applyQuaternion(s.q);
+  function iinv(vec) {
+    const l = vec.clone().applyQuaternion(s.q.clone().conjugate());
+    l.set(l.x / Ip, l.y / Ia, l.z / Ip);
+    return l.applyQuaternion(s.q);
+  }
+  s.toss = function () {
+    s.p.set(rnd(-0.5, 0.5), 1.2, rnd(0, 1));
+    s.v.set(rnd(-1, 1), rnd(12, 14), rnd(-0.4, 0.8));
+    s.q.setFromEuler(new THREE.Euler(Math.random() < 0.5 ? 0 : Math.PI, rnd(0, 6.28), 0));
+    s.q.premultiply(new Q().setFromEuler(new THREE.Euler(rnd(-0.15, 0.15), 0, rnd(-0.15, 0.15))));
+    s.w.set(rnd(22, 34) * (Math.random() < 0.5 ? -1 : 1), rnd(-3, 3), rnd(-2, 2));
+    s.active = true; s.age = 0; s.rest = 0; s.stuck = 0; s.result = null;
+  };
+  function contactPoints() {
+    const a = axisY();
+    const ux = new V(1, 0, 0).applyQuaternion(s.q), uz = new V(0, 0, 1).applyQuaternion(s.q);
+    const pts = [];
+    for (const sg of [1, -1]) {
+      const c = s.p.clone().addScaledVector(a, sg * h);
+      for (let k = 0; k < 12; k++) {
+        const t = k * Math.PI / 6;
+        pts.push(c.clone().addScaledVector(ux, Math.cos(t) * CR).addScaledVector(uz, Math.sin(t) * CR));
+      }
+    }
+    return pts;
+  }
+  function impulse(pt, n, J) {
+    s.v.addScaledVector(n, J / M);
+    s.w.add(iinv(pt.clone().sub(s.p).cross(n.clone().multiplyScalar(J))));
+  }
+  function effMass(r, n) {
+    return 1 / M + iinv(r.clone().cross(n)).cross(r).dot(n);
+  }
+  s.step = function (dt) {
+    if (!s.active) return;
+    s.age += dt;
+    s.v.y -= GRAV * dt;
+    s.p.addScaledVector(s.v, dt);
+    const wq = new Q(s.w.x, s.w.y, s.w.z, 0).multiply(s.q);
+    s.q.set(s.q.x + 0.5 * dt * wq.x, s.q.y + 0.5 * dt * wq.y, s.q.z + 0.5 * dt * wq.z, s.q.w + 0.5 * dt * wq.w).normalize();
+    let pts = contactPoints();
+    let minY = Math.min(...pts.map(p => p.y));
+    let touching = minY < 0.002;
+    if (minY < 0) { s.p.y -= minY; pts.forEach(p => p.y -= minY); }
+    const n = new V(0, 1, 0);
+    let hit = 0;
+    for (let it = 0; it < 4; it++) {
+      for (const pt of pts) {
+        if (pt.y > 0.004) continue;
+        const r = pt.clone().sub(s.p);
+        let vel = s.v.clone().add(s.w.clone().cross(r));
+        if (vel.y < 0) {
+          const e = -vel.y > 2.5 ? 0.45 : 0;
+          const j = -(1 + e) * vel.y / effMass(r, n);
+          if (it === 0) hit = Math.max(hit, -vel.y);
+          impulse(pt, n, j);
+          vel = s.v.clone().add(s.w.clone().cross(r));
+          const vt = new V(vel.x, 0, vel.z), sp = vt.length();
+          if (sp > 1e-5) {
+            const t = vt.divideScalar(sp);
+            const jt = Math.min(sp / effMass(r, t), 0.4 * j);
+            impulse(pt, t, -jt);
+          }
+        }
+      }
+    }
+    if (hit > 1.2 && s.onImpact) s.onImpact(hit);
+    if (touching) {
+      const kd = Math.exp(-1.2 * dt);
+      s.v.x *= kd; s.v.z *= kd; s.w.multiplyScalar(Math.exp(-(s.age > 5 ? 4 : 1.0) * dt));
+    }
+    // dinlenme tespiti
+    const a = axisY();
+    if (touching && s.v.length() < 0.3 && s.w.length() < 0.8) s.rest += dt; else s.rest = 0;
+    if (s.age > 9 && touching) { s.rest = 1; s.v.multiplyScalar(0.5); s.w.multiplyScalar(0.5); }
+    if (s.age > 12) { s.rest = 1; }
+    if (s.rest > 0.3 && (Math.abs(a.y) > 0.985 || s.age > 12)) {
+      {
+        const target = new V(0, a.y > 0 ? 1 : -1, 0);
+        s.q.premultiply(new Q().setFromUnitVectors(a, target));
+        s.p.y = h; s.v.set(0, 0, 0); s.w.set(0, 0, 0);
+        s.active = false; s.result = a.y > 0 ? 'yazi' : 'tura';
+        if (s.onDone) s.onDone(s.result);
+      }
+    } else if (s.rest > 1.5) { s.w.add(new V(rnd(-1, 1), 0, rnd(-1, 1))); s.rest = 0; }
+  };
+  return s;
+}
+/*PHYS_END*/
 
-  flipBtn.addEventListener('click', () => {
-    flipBtn.disabled = true;
-    result.textContent = 'Para havada...';
-    const isYazi = Math.random() < 0.5;
-    // Yazı = 0°, Tura = 180° (mod 360); en az 5 tam tur ekle
-    const current = rotation % 360;
-    const target = isYazi ? 0 : 180;
-    rotation += 360 * 5 + ((target - current + 360) % 360);
-    coin.style.transform = `rotateY(${rotation}deg)`;
-    setTimeout(() => {
-      const key = isYazi ? 'yazi' : 'tura';
-      counts[key]++;
-      document.getElementById(key + 'Count').textContent = counts[key];
-      result.textContent = isYazi ? 'Yazı geldi!' : 'Tura geldi!';
-      flipBtn.disabled = false;
-    }, 1700);
-  });
 
-  document.getElementById('reset').addEventListener('click', () => {
-    counts.yazi = counts.tura = 0;
-    document.getElementById('yaziCount').textContent = 0;
-    document.getElementById('turaCount').textContent = 0;
-    result.textContent = 'Parayı atmak için düğmeye bas.';
+/* ---------- Sahne ---------- */
+const view = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0c2226);
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+camera.position.set(0, 8.5, 12.5);
+camera.lookAt(0, 2.0, 0);
+
+scene.add(new THREE.HemisphereLight(0xcfe9e4, 0x10282c, 0.75));
+const sun = new THREE.DirectionalLight(0xfff1d6, 0.95);
+sun.position.set(-5, 14, 6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 1, far: 40 });
+scene.add(sun);
+const rim = new THREE.PointLight(0xffd9a0, 0.5, 40); rim.position.set(6, 6, -4); scene.add(rim);
+
+const table = new THREE.Mesh(
+  new THREE.CircleGeometry(16, 64).rotateX(-Math.PI / 2),
+  new THREE.MeshStandardMaterial({ color: 0x1d4a50, roughness: 0.85 })
+);
+table.receiveShadow = true; scene.add(table);
+
+function faceTex(kind) {
+  const c = document.createElement('canvas'); c.width = c.height = 512;
+  const x = c.getContext('2d'), yazi = kind === 'yazi';
+  const stops = yazi ? ['#f8e3a0', '#d9a441', '#9a6a14'] : ['#f0b392', '#c4724f', '#7a3b25'];
+  const dark = yazi ? '#6b470a' : '#5a2616', light = yazi ? '#ecc669' : '#dd9a78';
+  const g = x.createRadialGradient(190, 170, 20, 256, 256, 280);
+  g.addColorStop(0, stops[0]); g.addColorStop(.55, stops[1]); g.addColorStop(1, stops[2]);
+  x.fillStyle = g; x.fillRect(0, 0, 512, 512);
+  x.strokeStyle = dark; x.lineWidth = 12; x.beginPath(); x.arc(256, 256, 236, 0, 7); x.stroke();
+  x.fillStyle = dark;
+  for (let i = 0; i < 64; i++) { const t = i / 64 * 6.2832; x.beginPath(); x.arc(256 + Math.cos(t) * 212, 256 + Math.sin(t) * 212, 5, 0, 7); x.fill(); }
+  x.fillStyle = light; x.lineWidth = 7; x.beginPath(); x.arc(256, 256, 150, 0, 7); x.fill(); x.stroke();
+  x.fillStyle = dark; x.textAlign = 'center'; x.textBaseline = 'middle';
+  const label = yazi ? 'YAZI' : 'TURA';
+  x.font = 'bold 38px Georgia'; 
+  for (let i = 0; i < 4; i++) {
+    const t = -Math.PI / 2 + (i - 1.5) * 0.2;
+    x.save(); x.translate(256 + Math.cos(t) * 182, 256 + Math.sin(t) * 182); x.rotate(t + Math.PI / 2);
+    x.fillText(label[i], 0, 0); x.restore();
+  }
+  if (yazi) { x.font = 'bold 190px Georgia'; x.fillText('1', 256, 270); }
+  else {
+    x.beginPath(); x.arc(238, 256, 100, 0, 7); x.arc(272, 256, 82, 0, 7); x.fill('evenodd');
+    x.beginPath();
+    for (let i = 0; i < 10; i++) { const r = i % 2 ? 17 : 40, t = -Math.PI / 2 + i * Math.PI / 5; x.lineTo(345 + Math.cos(t) * r, 256 + Math.sin(t) * r); }
+    x.closePath(); x.fill();
+  }
+  const tex = new THREE.CanvasTexture(c); tex.anisotropy = 4; return tex;
+}
+const phong = (o) => new THREE.MeshPhongMaterial(Object.assign({ shininess: 110, specular: 0x887755 }, o));
+const coin = new THREE.Mesh(
+  new THREE.CylinderGeometry(CR, CR, CH, 72),
+  [phong({ color: 0xb98a2f }), phong({ map: faceTex('yazi') }), phong({ map: faceTex('tura') })]
+);
+coin.castShadow = true; scene.add(coin);
+
+const sim = makeSim(THREE);
+function syncCoin() { coin.position.copy(sim.p); coin.quaternion.copy(sim.q); }
+syncCoin();
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+/* ---------- Ses ---------- */
+let ctx = null, muted = false, lastClink = 0;
+function audio() {
+  ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+  if (ctx.state === 'suspended') ctx.resume();
+  return ctx;
+}
+function clink(vol, pitch) {
+  const c = audio(), t = c.currentTime;
+  [1, 1.51, 2.32, 3.1].forEach((m, i) => {
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = 'sine'; o.frequency.value = 1750 * pitch * m;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol / (i + 1.4), t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5 / (i + 1));
+    o.connect(g).connect(c.destination); o.start(t); o.stop(t + 0.6);
   });
+}
+function whoosh() {
+  const c = audio(), len = c.sampleRate * 1.2, buf = c.createBuffer(1, len, c.sampleRate);
+  const d = buf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  const src = c.createBufferSource(); src.buffer = buf;
+  const f = c.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 3;
+  const t = c.currentTime;
+  f.frequency.setValueAtTime(500, t); f.frequency.exponentialRampToValueAtTime(2600, t + 0.5); f.frequency.exponentialRampToValueAtTime(700, t + 1.2);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.12, t + 0.25); g.gain.linearRampToValueAtTime(0.0001, t + 1.2);
+  src.connect(f).connect(g).connect(c.destination); src.start(t);
+}
+sim.onImpact = (speed) => {
+  if (muted || performance.now() - lastClink < 45) return;
+  lastClink = performance.now();
+  clink(Math.min(0.6, 0.05 + speed * 0.045), 0.9 + Math.random() * 0.3);
+};
+
+/* ---------- Oyun ---------- */
+const flipBtn = document.getElementById('flip'), result = document.getElementById('result');
+const counts = { yazi: 0, tura: 0 };
+sim.onDone = (r) => {
+  counts[r]++;
+  document.getElementById(r + 'Count').textContent = counts[r];
+  result.textContent = r === 'yazi' ? 'Yazı geldi!' : 'Tura geldi!';
+  flipBtn.disabled = false;
+};
+flipBtn.addEventListener('click', () => {
+  flipBtn.disabled = true; result.textContent = 'Para havada...';
+  sim.toss();
+  if (!muted) { clink(0.3, 1.3); whoosh(); }
+});
+document.getElementById('mute').addEventListener('click', (e) => {
+  muted = !muted; e.target.textContent = muted ? 'Ses: kapalı' : 'Ses: açık'; e.target.setAttribute('aria-pressed', muted);
+});
+document.getElementById('reset').addEventListener('click', () => {
+  counts.yazi = counts.tura = 0;
+  document.getElementById('yaziCount').textContent = 0; document.getElementById('turaCount').textContent = 0;
+  result.textContent = 'Parayı atmak için düğmeye bas.';
+});
+
+let last = performance.now(), acc = 0;
+const DT = 1 / 240;
+(function loop(now) {
+  acc += Math.min((now - last) / 1000, 0.05); last = now;
+  while (acc >= DT) { sim.step(DT); acc -= DT; }
+  syncCoin(); renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+})(last);
 </script>
 </body>
 </html>
