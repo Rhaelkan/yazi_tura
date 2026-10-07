@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yazı Tura</title>
+<style>
+  :root {
+    --bg: #1b2a41; --ink: #f3efe6; --muted: #9fb0c8;
+    --gold: #e8b73c; --gold-dark: #a97c14; --copper: #c9d4e3; --copper-dark: #7d8ca3;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: Georgia, "Times New Roman", serif;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 28px; padding: 24px; text-align: center;
+  }
+  h1 { font-size: clamp(2rem, 6vw, 3rem); margin: 0; letter-spacing: .02em; }
+  .stage { perspective: 900px; height: 190px; display: flex; align-items: center; }
+  .coin {
+    width: 160px; height: 160px; position: relative;
+    transform-style: preserve-3d; transition: transform 1.6s cubic-bezier(.2,.7,.2,1);
+  }
+  .face {
+    position: absolute; inset: 0; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2.1rem; font-weight: bold; backface-visibility: hidden;
+    border: 6px solid rgba(0,0,0,.18);
+  }
+  .yazi { background: radial-gradient(circle at 35% 30%, #f6d77a, var(--gold) 60%, var(--gold-dark)); color: #5b4108; }
+  .tura { background: radial-gradient(circle at 35% 30%, #eef2f8, var(--copper) 60%, var(--copper-dark)); color: #3b4659; transform: rotateY(180deg); }
+  .result { font-size: 1.5rem; min-height: 2rem; }
+  button {
+    font: inherit; font-size: 1.1rem; padding: 12px 32px; border-radius: 999px;
+    border: 2px solid var(--gold); background: var(--gold); color: #2a1f05; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: wait; }
+  button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+  .score { display: flex; gap: 32px; color: var(--muted); font-size: 1.1rem; }
+  .score strong { color: var(--ink); font-size: 1.5rem; display: block; }
+  .reset { background: transparent; color: var(--muted); border-color: var(--muted); font-size: .9rem; padding: 6px 18px; }
+  @media (prefers-reduced-motion: reduce) { .coin { transition-duration: .01s; } }
+</style>
+</head>
+<body>
+  <h1>Yazı mı, Tura mı?</h1>
+  <div class="stage"><div class="coin" id="coin">
+    <div class="face yazi">YAZI</div>
+    <div class="face tura">TURA</div>
+  </div></div>
+  <div class="result" id="result" aria-live="polite">Parayı atmak için düğmeye bas.</div>
+  <button id="flip">Parayı at</button>
+  <div class="score">
+    <div><strong id="yaziCount">0</strong>Yazı</div>
+    <div><strong id="turaCount">0</strong>Tura</div>
+  </div>
+  <button class="reset" id="reset">Sıfırla</button>
+
+<script>
+  const coin = document.getElementById('coin');
+  const result = document.getElementById('result');
+  const flipBtn = document.getElementById('flip');
+  const counts = { yazi: 0, tura: 0 };
+  let rotation = 0;
+
+  flipBtn.addEventListener('click', () => {
+    flipBtn.disabled = true;
+    result.textContent = 'Para havada...';
+    const isYazi = Math.random() < 0.5;
+    // Yazı = 0°, Tura = 180° (mod 360); en az 5 tam tur ekle
+    const current = rotation % 360;
+    const target = isYazi ? 0 : 180;
+    rotation += 360 * 5 + ((target - current + 360) % 360);
+    coin.style.transform = `rotateY(${rotation}deg)`;
+    setTimeout(() => {
+      const key = isYazi ? 'yazi' : 'tura';
+      counts[key]++;
+      document.getElementById(key + 'Count').textContent = counts[key];
+      result.textContent = isYazi ? 'Yazı geldi!' : 'Tura geldi!';
+      flipBtn.disabled = false;
+    }, 1700);
+  });
+
+  document.getElementById('reset').addEventListener('click', () => {
+    counts.yazi = counts.tura = 0;
+    document.getElementById('yaziCount').textContent = 0;
+    document.getElementById('turaCount').textContent = 0;
+    result.textContent = 'Parayı atmak için düğmeye bas.';
+  });
+</script>
+</body>
+</html>
