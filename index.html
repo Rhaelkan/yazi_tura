@@ -57,10 +57,11 @@ function makeSim(THREE) {
     l.set(l.x / Ip, l.y / Ia, l.z / Ip);
     return l.applyQuaternion(s.q);
   }
-  s.toss = function () {
-    s.p.set(rnd(-0.5, 0.5), 1.2, rnd(0, 1));
-    s.v.set(rnd(-1, 1), rnd(12, 14), rnd(-0.4, 0.8));
-    s.q.setFromEuler(new THREE.Euler(Math.random() < 0.5 ? 0 : Math.PI, rnd(0, 6.28), 0));
+  s.toss = function (pos, hold) {
+    s.p.copy(pos);
+    s.v.set(rnd(-0.7, 0.7), rnd(10.5, 12), rnd(-1.2, 0.2));
+    if (hold) s.q.copy(hold);
+    else s.q.setFromEuler(new THREE.Euler(Math.random() < 0.5 ? 0 : Math.PI, rnd(0, 6.28), 0));
     s.q.premultiply(new Q().setFromEuler(new THREE.Euler(rnd(-0.15, 0.15), 0, rnd(-0.15, 0.15))));
     s.w.set(rnd(22, 34) * (Math.random() < 0.5 ? -1 : 1), rnd(-3, 3), rnd(-2, 2));
     s.active = true; s.age = 0; s.rest = 0; s.stuck = 0; s.result = null;
@@ -209,7 +210,7 @@ coin.castShadow = true; scene.add(coin);
 
 const sim = makeSim(THREE);
 function syncCoin() { coin.position.copy(sim.p); coin.quaternion.copy(sim.q); }
-syncCoin();
+let muted = false;
 
 function resize() {
   const w = view.clientWidth, h = view.clientHeight;
@@ -218,7 +219,7 @@ function resize() {
 addEventListener('resize', resize); resize();
 
 /* ---------- Ses ---------- */
-let ctx = null, muted = false, lastClink = 0;
+let ctx = null, lastClink = 0;
 function audio() {
   ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
   if (ctx.state === 'suspended') ctx.resume();
@@ -254,6 +255,66 @@ sim.onImpact = (speed) => {
 
 /* ---------- Oyun ---------- */
 const flipBtn = document.getElementById('flip'), result = document.getElementById('result');
+/* ---------- İnsan eli ---------- */
+const V3 = THREE.Vector3;
+const skin = new THREE.MeshPhongMaterial({ color: 0xd9a07f, shininess: 14 });
+const cloth = new THREE.MeshPhongMaterial({ color: 0xe9e2d0, shininess: 4 });
+const hand = new THREE.Group(); scene.add(hand);
+const part = (parent, geo, mat, pos, scl) => {
+  const m = new THREE.Mesh(geo, mat); m.position.set(pos[0], pos[1], pos[2]);
+  if (scl) m.scale.set(scl[0], scl[1], scl[2]);
+  m.castShadow = true; parent.add(m); return m;
+};
+part(hand, new THREE.SphereGeometry(1, 28, 18), skin, [0, 0, 0], [1.45, 0.95, 1.25]);
+[[-0.9, 0.3, -0.85, 0.40], [-0.32, 0.38, -0.95, 0.45], [0.28, 0.4, -0.95, 0.46], [0.85, 0.36, -0.85, 0.42]]
+  .forEach(([x, y, z, r]) => part(hand, new THREE.SphereGeometry(r, 16, 12), skin, [x, y, z]));
+const thumb = new THREE.Group(); thumb.position.set(0.45, 0.5, 0.75); hand.add(thumb);
+part(thumb, new THREE.CylinderGeometry(0.3, 0.26, 1.3, 14).rotateX(Math.PI / 2), skin, [0, 0, -0.65]);
+part(thumb, new THREE.SphereGeometry(0.3, 14, 10), skin, [0, 0, -1.3]);
+const arm = new THREE.Group(); arm.rotation.x = 0.1; arm.position.set(0, -0.05, 0.6); hand.add(arm);
+part(arm, new THREE.CylinderGeometry(0.8, 0.95, 2.6, 20).rotateX(Math.PI / 2), skin, [0, 0, 1.3]);
+part(arm, new THREE.CylinderGeometry(1.2, 1.35, 7, 24).rotateX(Math.PI / 2), cloth, [0, 0, 6.1]);
+
+const ANCHOR = new V3(0.45, 1.12, -0.4);
+const READY = new V3(0, 1.6, 1.4), REST = new V3(2.5, 1.6, 9.5);
+const ease = (t) => 1 - Math.pow(1 - t, 3);
+const lerp = (a, b, t) => a + (b - a) * t;
+const randFlat = () => new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.random() < 0.5 ? 0 : Math.PI, Math.random() * 6.28, 0));
+let phase = 'held', pt = 0, heldQ = randFlat(), pickP = new V3(), pickQ = new THREE.Quaternion(), endPos = new V3();
+function pose(pos, tilt, th) {
+  hand.position.copy(pos); hand.rotation.x = tilt; thumb.rotation.x = th; hand.updateMatrixWorld(true);
+}
+const anchorWorld = () => ANCHOR.clone().applyMatrix4(hand.matrixWorld);
+function hold() { sim.p.copy(anchorWorld()); sim.q.copy(heldQ); }
+function updateHand(dt) {
+  if (phase === 'held') { pose(READY, 0, -0.1); hold(); }
+  else if (phase === 'reach') {
+    pt += dt / 0.6; const u = Math.min(pt, 1);
+    pose(REST.clone().lerp(READY, ease(u)), 0, -0.1);
+    const e = ease(Math.min(Math.max((pt - 0.35) / 0.65, 0), 1)), a = anchorWorld();
+    sim.p.copy(pickP).lerp(a, e); sim.p.y += Math.sin(Math.PI * e) * 1.2;
+    sim.q.copy(pickQ).slerp(heldQ, e);
+    if (pt >= 1) { phase = 'wind'; pt = 0; hold(); if (!muted) clink(0.12, 1.7); }
+  } else if (phase === 'wind') {
+    pt += dt / 0.22; const e = ease(Math.min(pt, 1));
+    pose(new V3(READY.x, READY.y - 0.35 * e, READY.z), 0.12 * e, lerp(-0.1, -0.35, e)); hold();
+    if (pt >= 1) { phase = 'flick'; pt = 0; }
+  } else if (phase === 'flick') {
+    pt += dt / 0.09; const e = Math.min(pt, 1);
+    pose(new V3(READY.x, lerp(READY.y - 0.35, READY.y + 0.6, e), READY.z), lerp(0.12, -0.15, e), lerp(-0.35, 0.55, e)); hold();
+    if (pt >= 1) {
+      sim.toss(anchorWorld(), heldQ);
+      if (!muted) { clink(0.3, 1.3); whoosh(); }
+      result.textContent = 'Para havada...';
+      endPos.copy(hand.position); phase = 'retreat'; pt = 0;
+    }
+  } else if (phase === 'retreat') {
+    pt += dt / 0.6; const e = ease(Math.min(pt, 1));
+    pose(endPos.clone().lerp(REST, e), lerp(-0.15, 0, e), lerp(0.55, -0.1, e));
+    if (pt >= 1) { phase = 'away'; hand.visible = false; }
+  }
+}
+
 const counts = { yazi: 0, tura: 0 };
 sim.onDone = (r) => {
   counts[r]++;
@@ -262,9 +323,12 @@ sim.onDone = (r) => {
   flipBtn.disabled = false;
 };
 flipBtn.addEventListener('click', () => {
-  flipBtn.disabled = true; result.textContent = 'Para havada...';
-  sim.toss();
-  if (!muted) { clink(0.3, 1.3); whoosh(); }
+  if (phase !== 'held' && phase !== 'away') return;
+  flipBtn.disabled = true; result.textContent = 'Para hazırlanıyor...';
+  if (phase === 'away') {
+    heldQ = randFlat(); pickP.copy(sim.p); pickQ.copy(sim.q); hand.visible = true; phase = 'reach';
+  } else phase = 'wind';
+  pt = 0;
 });
 document.getElementById('mute').addEventListener('click', (e) => {
   muted = !muted; e.target.textContent = muted ? 'Ses: kapalı' : 'Ses: açık'; e.target.setAttribute('aria-pressed', muted);
@@ -275,10 +339,11 @@ document.getElementById('reset').addEventListener('click', () => {
   result.textContent = 'Parayı atmak için düğmeye bas.';
 });
 
-let last = performance.now(), acc = 0;
+let last = performance.now(), last0 = last, acc = 0;
 const DT = 1 / 240;
 (function loop(now) {
   acc += Math.min((now - last) / 1000, 0.05); last = now;
+  updateHand(Math.min((now - last0) / 1000, 0.05)); last0 = now;
   while (acc >= DT) { sim.step(DT); acc -= DT; }
   syncCoin(); renderer.render(scene, camera);
   requestAnimationFrame(loop);
